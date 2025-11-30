@@ -73,6 +73,14 @@ const nextLabel = computed(() => {
   })`;
 });
 
+// ------- helper: normalisasi URL video (http -> https) -------
+function normalizeVideoUrl(url: string): string {
+  if (url.startsWith("http://")) {
+    return url.replace(/^http:\/\//, "https://");
+  }
+  return url;
+}
+
 function goBack() {
   router.back();
 }
@@ -96,6 +104,14 @@ function handleEnded() {
   }
 }
 
+const isFullscreen = ref(false);
+function enterFullscreen() {
+  isFullscreen.value = true;
+}
+function exitFullscreen() {
+  isFullscreen.value = false;
+}
+
 async function fetchVideo() {
   if (!videoId.value) return;
 
@@ -116,18 +132,26 @@ async function fetchVideo() {
     }
 
     const data: VideoApiResponse = await res.json();
-
     const rawData = data.raw?.data;
-    if (!rawData || !rawData.main_url) {
+
+    if (!rawData) {
+      throw new Error("Data video tidak ditemukan dalam respons.");
+    }
+
+    // ambil main_url dulu, kalau kosong coba backup_url
+    const rawUrl = rawData.main_url || rawData.backup_url;
+    if (!rawUrl) {
       throw new Error("URL video tidak ditemukan dalam respons.");
     }
 
-    videoUrl.value = rawData.main_url;
+    // 🔑 FIX: normalisasi ke HTTPS, menghindari mixed-content di Android/WebView
+    videoUrl.value = normalizeVideoUrl(rawUrl);
 
     // coba ambil poster & duration dari video_model kalau ada
     if (rawData.video_model) {
       try {
         const model = JSON.parse(rawData.video_model);
+
         if (model.poster_url) {
           posterUrl.value = model.poster_url;
         } else if (rawData.poster_url) {
@@ -249,7 +273,7 @@ watch(
         </div>
 
         <div v-if="hasNext" class="hidden sm:flex items-center gap-1.5">
-          <span class="text-[10px] text-slate-500"> Auto next </span>
+          <span class="text-[10px] text-slate-500">Auto next</span>
           <span
             class="inline-flex h-4 w-7 items-center justify-start rounded-full bg-slate-900 border border-slate-700 p-0.5"
           >
@@ -299,22 +323,71 @@ watch(
 
       <!-- Player -->
       <div v-else class="flex-1 flex flex-col gap-3">
-        <div class="w-full flex justify-center">
-          <video
-            v-if="videoUrl"
-            :key="videoId"
-            class="w-full max-w-[420px] max-h-[80vh] rounded-2xl bg-black"
-            :src="videoUrl"
-            :poster="posterUrl || undefined"
-            controls
-            autoplay
-            playsinline
-            @ended="handleEnded"
-          />
+        <!-- Normal mode / fake fullscreen mode -->
+        <div
+          :class="[
+            isFullscreen
+              ? 'fixed inset-0 z-50 bg-black flex items-center justify-center'
+              : 'w-full flex justify-center',
+          ]"
+        >
+          <div
+            :class="[
+              'relative',
+              isFullscreen
+                ? 'w-full h-full max-w-none'
+                : 'w-full max-w-[420px]',
+            ]"
+          >
+            <video
+              v-if="videoUrl"
+              :key="videoId"
+              class="w-full h-full max-h-[80vh] rounded-2xl bg-black object-contain"
+              :class="isFullscreen ? 'max-h-none' : ''"
+              :src="videoUrl"
+              :poster="posterUrl || undefined"
+              controls
+              playsinline
+              autoplay
+              @ended="handleEnded"
+            />
+
+            <!-- Tombol fullscreen enter -->
+            <button
+              v-if="!isFullscreen"
+              type="button"
+              @click="enterFullscreen"
+              class="absolute right-2 top-2 inline-flex h-8 w-8 items-center justify-center rounded-full bg-black/60 text-white border border-white/30 backdrop-blur-sm transition hover:bg-black/80"
+            >
+              <svg
+                class="h-4 w-4"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M4 9V5a1 1 0 0 1 1-1h4m10 4V5a1 1 0 0 0-1-1h-4M4 15v4a1 1 0 0 0 1 1h4m10-4v4a1 1 0 0 1-1 1h-4"
+                />
+              </svg>
+            </button>
+
+            <!-- Tombol fullscreen exit -->
+            <button
+              v-if="isFullscreen"
+              type="button"
+              @click="exitFullscreen"
+              class="absolute right-3 top-3 inline-flex h-9 w-9 items-center justify-center rounded-full bg-black/70 text-white border border-white/40"
+            >
+              ✕
+            </button>
+          </div>
         </div>
 
-        <!-- Info & next -->
-        <div class="mt-2 flex flex-col gap-2">
+        <!-- Info & next (disembunyiin kalau lagi fullscreen biar bersih) -->
+        <div v-if="!isFullscreen" class="mt-2 flex flex-col gap-2">
           <div class="flex items-center justify-between text-xs">
             <div class="text-slate-400">
               <span v-if="videoDuration">
@@ -354,9 +427,9 @@ watch(
           </p>
         </div>
 
-        <!-- Progress kecil di bawah (opsional) -->
+        <!-- Progress kecil juga disembunyiin kalau fullscreen -->
         <div
-          v-if="seriesMeta && vidList.length"
+          v-if="!isFullscreen && seriesMeta && vidList.length"
           class="mt-2 flex items-center justify-between text-[10px] text-slate-500"
         >
           <span>

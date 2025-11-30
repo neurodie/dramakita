@@ -2,6 +2,11 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import {
+  addOrUpdateBookmark,
+  removeBookmark,
+  isSeriesBookmarked,
+} from "../lib/bookmarks";
 
 const route = useRoute();
 const router = useRouter();
@@ -40,6 +45,9 @@ const seriesMeta = ref<SeriesMeta | null>(null);
 const episodes = ref<Episode[]>([]);
 const vidList = ref<string[]>([]);
 
+// state bookmark
+const isBookmarked = ref(false);
+
 const seriesId = computed(() => route.params.id as string);
 
 function goBack() {
@@ -59,6 +67,11 @@ function formatLikes(num: number) {
     return (num / 1_000_000).toFixed(1).replace(/\.0$/, "") + " jt";
   if (num >= 1000) return (num / 1000).toFixed(1).replace(/\.0$/, "") + " rb";
   return num.toString();
+}
+
+function syncBookmarkState() {
+  if (!seriesMeta.value) return;
+  isBookmarked.value = isSeriesBookmarked(seriesMeta.value.series_id);
 }
 
 async function fetchSeries() {
@@ -82,6 +95,9 @@ async function fetchSeries() {
     seriesMeta.value = data.series;
     episodes.value = data.episodes || [];
     vidList.value = data.vid_list || [];
+
+    // setelah meta keisi → cek bookmark
+    syncBookmarkState();
   } catch (err: any) {
     console.error(err);
     error.value =
@@ -95,8 +111,31 @@ function openEpisode(ep: Episode) {
   router.push({
     name: "video",
     params: { id: ep.vid }, // /video/:id
-    query: { series_id: seriesId.value || "" }, // buat tahu list buat auto-next
+    query: { series_id: seriesId.value || "" }, // buat auto-next
   });
+}
+
+function toggleBookmark() {
+  if (!seriesMeta.value) return;
+
+  if (isBookmarked.value) {
+    // hapus dari bookmark
+    removeBookmark(seriesMeta.value.series_id);
+    isBookmarked.value = false;
+  } else {
+    // tambah ke bookmark
+    addOrUpdateBookmark({
+      series_id: seriesId.value,
+      title: seriesMeta.value.title,
+      intro: seriesMeta.value.intro,
+      cover: seriesMeta.value.cover,
+      episode_count: seriesMeta.value.episode_count,
+      episode_text: seriesMeta.value.episode_text,
+      play_count: seriesMeta.value.play_count,
+      added_at: new Date().toISOString(),
+    });
+    isBookmarked.value = true;
+  }
 }
 
 onMounted(() => {
@@ -198,16 +237,49 @@ onMounted(() => {
           </div>
 
           <div class="flex-1 min-w-0 flex flex-col gap-2">
-            <div>
-              <h2 class="text-xl font-semibold leading-snug">
-                {{ seriesMeta.title }}
-              </h2>
-              <p class="mt-1 text-xs text-slate-400">
-                {{ seriesMeta.episode_text }} •
-                <span class="text-slate-300">
-                  {{ seriesMeta.play_count.toLocaleString("id-ID") }} tayangan
-                </span>
-              </p>
+            <!-- Title + bookmark -->
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0">
+                <h2 class="text-xl font-semibold leading-snug">
+                  {{ seriesMeta.title }}
+                </h2>
+                <p class="mt-1 text-xs text-slate-400">
+                  {{ seriesMeta.episode_text }} •
+                  <span class="text-slate-300">
+                    {{ seriesMeta.play_count.toLocaleString("id-ID") }}
+                    tayangan
+                  </span>
+                </p>
+              </div>
+
+              <button
+                type="button"
+                @click="toggleBookmark"
+                class="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-medium transition"
+                :class="
+                  isBookmarked
+                    ? 'border-yellow-400/70 bg-yellow-400/10 text-yellow-100'
+                    : 'border-slate-700 bg-slate-900/80 text-slate-200 hover:border-pink-500/70 hover:text-pink-100'
+                "
+              >
+                <svg
+                  class="h-3.5 w-3.5"
+                  fill="currentColor"
+                  viewBox="0 0 20 20"
+                >
+                  <path
+                    v-if="isBookmarked"
+                    d="M5 2.5A1.5 1.5 0 0 1 6.5 1h7A1.5 1.5 0 0 1 15 2.5V17l-5-3-5 3V2.5z"
+                  />
+                  <path
+                    v-else
+                    fill-rule="evenodd"
+                    d="M6.5 2A.5.5 0 0 0 6 2.5V15.1l3.553-2.132a1 1 0 0 1 .894 0L14 15.1V2.5a.5.5 0 0 0-.5-.5h-7zM6.5 1A1.5 1.5 0 0 0 5 2.5V17l5-3 5 3V2.5A1.5 1.5 0 0 0 13.5 1h-7z"
+                    clip-rule="evenodd"
+                  />
+                </svg>
+                <span>{{ isBookmarked ? "Tersimpan" : "Bookmark" }}</span>
+              </button>
             </div>
 
             <p
@@ -233,7 +305,7 @@ onMounted(() => {
           </div>
         </section>
 
-        <!-- Daftar episode -->
+        <!-- Daftar episode (tetap sama) -->
         <section
           class="rounded-3xl border border-slate-800 bg-slate-900/80 p-4 sm:p-5"
         >

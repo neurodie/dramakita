@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from "vue";
 import { useRouter } from "vue-router";
-
+import { TelegramApp } from "../tele/telegram";
 interface Book {
   book_id: string;
   book_name: string;
@@ -26,8 +26,10 @@ interface BookMallResponse {
 
 const API_BASE = "https://melolo-api-one.vercel.app";
 const MIN_SEARCH_LENGTH = 3;
+
 const router = useRouter();
 
+// state utama
 const books = ref<Book[]>([]);
 const loading = ref(true);
 const error = ref<string | null>(null);
@@ -37,6 +39,9 @@ const selectedTag = ref<string | null>(null);
 
 const lastSearchTotal = ref<number | null>(null);
 const lastSearchQuery = ref<string>("");
+
+// user Telegram (kalau dibuka dari mini app)
+const user = ref<any | null>(null);
 
 // ambil daftar tag unik dari stat_infos
 const allTags = computed(() => {
@@ -100,7 +105,6 @@ async function fetchBookMall() {
         book_name: item.title,
         author: item.author,
         abstract: item.abstract,
-        // langsung pakai proxy di sini
         thumb_url: `${API_BASE}/proxy-img?url=${encodeURIComponent(
           item.cover
         )}`,
@@ -118,7 +122,6 @@ async function fetchBookMall() {
       const fromApi: any[] = data.cell?.books ?? [];
       books.value = fromApi.map((b: any) => ({
         ...b,
-        // asumsi b.thumb_url adalah url asli dari API novel
         thumb_url: `${API_BASE}/proxy-img?url=${encodeURIComponent(
           b.thumb_url
         )}`,
@@ -143,27 +146,30 @@ function goToSeries(bookId: string) {
 watch(searchQuery, (val) => {
   const q = val.trim();
 
-  // kalau kosong => load lagi bookmall default
   if (!q) {
     fetchBookMall();
     return;
   }
 
-  // kalau kurang dari batas minimal => jangan request apa-apa
   if (q.length < MIN_SEARCH_LENGTH) {
-    // optional: reset info hasil pencarian
     lastSearchTotal.value = null;
     lastSearchQuery.value = "";
     return;
   }
 
-  // kalau sudah >= 4 karakter => baru request search
   fetchBookMall();
 });
 
 onMounted(() => {
+  // ambil user Telegram kalau ada (kalau dibuka di browser biasa = null)
+  user.value = TelegramApp.getUser();
   fetchBookMall();
 });
+
+// router to profile
+function goToProfile() {
+  router.push({ name: "profile" }); // pastikan route "profile" nanti ada di router
+}
 </script>
 
 <template>
@@ -173,34 +179,70 @@ onMounted(() => {
       class="border-b border-slate-800 bg-slate-950/70 backdrop-blur-lg sticky top-0 z-20"
     >
       <div class="mx-auto max-w-6xl px-4 py-3 flex items-center gap-3">
-        <div
-          class="h-9 w-9 rounded-2xl bg-gradient-to-br from-pink-500 via-fuchsia-500 to-sky-500 flex items-center justify-center text-xs font-bold tracking-tight shadow-lg shadow-pink-500/30"
+        <!-- Kiri: brand + user, bisa diklik ke profil -->
+        <button
+          type="button"
+          @click="goToProfile"
+          class="flex items-center gap-3 text-left focus:outline-none w-full"
         >
-          DK
-        </div>
-        <div class="flex-1">
-          <div class="flex items-center justify-between gap-3">
-            <div>
-              <h1 class="text-lg font-semibold tracking-tight">DramaKita</h1>
-              <p class="text-xs text-slate-400">
-                Discover • Trending Romansa & Drama
-              </p>
-            </div>
-            <button
-              @click="fetchBookMall"
-              class="hidden sm:inline-flex items-center gap-1 rounded-full border border-slate-700/70 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-800/80 transition"
-            >
-              <span class="relative inline-flex h-1.5 w-1.5">
-                <span
-                  class="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"
-                ></span>
-                <span
-                  class="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400"
-                ></span>
-              </span>
-              Refresh
-            </button>
+          <!-- Avatar -->
+          <div
+            class="h-9 w-9 rounded-full bg-[#3390ec] flex items-center justify-center text-sm font-bold uppercase text-white shadow-lg shadow-blue-500/30"
+          >
+            {{ user?.first_name?.substring(0, 1) || "U" }}
           </div>
+
+          <!-- Info -->
+          <div class="min-w-0">
+            <div class="flex items-center gap-2">
+              <h1 class="text-base font-semibold tracking-tight">
+                {{ user?.first_name || "Guest" }}
+              </h1>
+
+              <span
+                v-if="user"
+                class="inline-flex items-center gap-1 rounded-full bg-pink-500/10 border border-pink-400/20 px-2 py-0.5 text-[10px] font-medium text-pink-300"
+              >
+                freemium
+              </span>
+            </div>
+
+            <!-- Subtext -->
+            <div class="flex items-center gap-1 text-[11px] text-slate-400">
+              <svg
+                class="h-3.5 w-3.5"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M15 12h3m0 0l-2-2m2 2l-2 2m-4-6a4 4 0 11-8 0 4 4 0 018 0zM5 20h8a2 2 0 002-2v-1a6 6 0 00-12 0v1a2 2 0 002 2z"
+                />
+              </svg>
+              <span>Akses ke profile kamu</span>
+            </div>
+          </div>
+        </button>
+
+        <!-- Kanan: tombol refresh -->
+        <div class="flex-1 flex justify-end">
+          <button
+            @click="fetchBookMall"
+            class="hidden sm:inline-flex items-center gap-1 rounded-full border border-slate-700/70 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-800/80 transition"
+          >
+            <span class="relative inline-flex h-1.5 w-1.5">
+              <span
+                class="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"
+              ></span>
+              <span
+                class="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400"
+              ></span>
+            </span>
+            Refresh
+          </button>
         </div>
       </div>
     </header>
@@ -212,18 +254,18 @@ onMounted(() => {
           <div
             class="flex items-center gap-2 text-xs font-medium text-pink-300/90"
           >
-            <span
+            <!-- <span
               class="inline-flex h-5 w-5 items-center justify-center rounded-full bg-pink-500/10 text-[10px] border border-pink-500/40"
             >
               ★
             </span>
-            <span>Trending hari ini</span>
+            <span>Trending hari ini</span> -->
           </div>
           <h2 class="mt-1 text-xl font-semibold tracking-tight">
             Koleksi romansa panas & CEO drama
           </h2>
           <p class="mt-1 text-xs text-slate-400">
-            Swipe, pilih satu judul, dan tenggelam di dunia drama.
+            Nikmati drama short dari berbagai sumber online :)
           </p>
         </div>
 
@@ -232,7 +274,6 @@ onMounted(() => {
             <span
               class="pointer-events-none absolute inset-y-0 left-3 flex items-center text-slate-500"
             >
-              <!-- search icon -->
               <svg
                 class="h-4 w-4"
                 fill="none"
@@ -258,7 +299,7 @@ onMounted(() => {
       </section>
 
       <!-- Tag filter -->
-      <section v-if="allTags.length" class="mb-4">
+      <!-- <section v-if="allTags.length" class="mb-4">
         <div class="flex flex-wrap gap-2 text-xs">
           <button
             @click="selectTag(null)"
@@ -285,7 +326,7 @@ onMounted(() => {
             {{ tag }}
           </button>
         </div>
-      </section>
+      </section> -->
 
       <!-- Loading -->
       <section v-if="loading" class="mt-6 space-y-3">
@@ -359,7 +400,7 @@ onMounted(() => {
       <!-- List drama -->
       <section class="mt-4 space-y-3 pb-4">
         <div
-          v-if="!filteredBooks.length"
+          v-if="!filteredBooks.length && !loading && !error"
           class="rounded-2xl border border-slate-800 bg-slate-900/80 px-4 py-6 text-sm text-slate-300 text-center"
         >
           Tidak ada hasil untuk filter saat ini.
@@ -387,8 +428,7 @@ onMounted(() => {
             >
               <span
                 class="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400"
-              >
-              </span>
+              ></span>
               <span class="uppercase tracking-wide">Selesai</span>
             </div>
           </div>
@@ -485,10 +525,13 @@ onMounted(() => {
 
       <!-- footer kecil -->
       <footer class="mt-6 border-t border-slate-900 pt-4">
-        <p class="text-[10px] text-slate-500 text-center">
+        <!-- <p class="text-[10px] text-slate-500 text-center">
           Source:
-          <span class="font-medium text-slate-300">melolo / bookmall</span> •
-          Frontend by <span class="text-pink-300">hudaxcode</span>
+          <span class="font-medium text-slate-300">melolo / bookmall</span> • -->
+        <!-- Frontend by <span class="text-pink-300">hudaxcode</span> -->
+
+        <p class="text-[10px] text-slate-500 text-center">
+          kita drama <span class="text-pink-300">2025</span>
         </p>
       </footer>
     </main>

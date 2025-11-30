@@ -1,6 +1,9 @@
-<!-- src/App.vue -->
 <template>
-  <RouterView />
+  <div class="min-h-screen bg-slate-950 text-white">
+    <RouterView />
+  </div>
 </template>
 
-<script setup lang="ts"></script>
+<script setup lang="ts">
+import { RouterView } from "vue-router";
+</script>

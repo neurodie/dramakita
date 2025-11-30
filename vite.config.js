@@ -6,6 +6,11 @@ import tailwindcss from "@tailwindcss/vite";
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [vue(), tailwindcss()],
+  server: {
+    port: 5173,
+    host: true,
+    allowedHosts: ["d23dbc702e41.ngrok-free.app"],
+  },
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
