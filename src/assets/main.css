@@ -1,1 +1,9 @@
 @import "tailwindcss";
+@import "tailwindcss/utilities";
+
+@utility bg-tele-bg {
+  background-color: #006da3;
+}
+@utility text-telegram-text {
+  color: #ffffff;
+}
