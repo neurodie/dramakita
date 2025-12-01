@@ -372,7 +372,7 @@ onMounted(() => {
             class="flex-shrink-0 rounded-full border px-4 py-1.5 text-xs font-medium transition-all duration-300"
             :class="
               selectedTag === label
-                ? 'bg-gradient-to-r from-pink-500 to-rose-500 border-transparent text-white shadow-lg shadow-pink-500/20'
+                ? 'bg-tele-bg border-transparent text-white shadow-[0_0_10px_rgba(0,109,163,0.4)]'
                 : 'border-white/10 bg-transparent text-slate-400 hover:border-white/30 hover:text-slate-200'
             "
           >

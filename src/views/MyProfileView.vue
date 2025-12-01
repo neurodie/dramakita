@@ -207,7 +207,7 @@ onMounted(() => {
         class="rounded-3xl border border-slate-800 bg-slate-900/80 px-4 py-4 flex items-center gap-3"
       >
         <div
-          class="h-11 w-11 rounded-full bg-[#3390ec] flex items-center justify-center text-sm font-bold text-white shadow-lg shadow-sky-500/40 uppercase"
+          class="h-11 w-11 rounded-full bg-tele-bg flex items-center justify-center text-sm font-bold text-white shadow-lg shadow-sky-500/40 uppercase"
         >
           <span>{{ avatarInitial }}</span>
         </div>
