@@ -1,6 +1,6 @@
 <!-- src/views/BookmarksView.vue -->
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref, onMounted, computed } from "vue";
 import { useRouter } from "vue-router";
 import {
   getBookmarks,
@@ -14,22 +14,26 @@ const router = useRouter();
 const loading = ref(true);
 const items = ref<Bookmark[]>([]);
 
+// kalau nanti mau ganti backend image proxy, cukup ganti sini
+const IMAGE_PROXY_BASE = "https://melolo-api-one.vercel.app/proxy-img?url=";
+
+// ---------- Navigation ----------
 function goBack() {
   router.back();
 }
 
-function load() {
-  loading.value = true;
-  items.value = getBookmarks();
-  loading.value = false;
-}
-
 function openSeries(b: Bookmark) {
-  console.log("Open series", b);
   router.push({
     name: "series",
     params: { id: b.series_id },
   });
+}
+
+// ---------- Bookmark actions ----------
+function load() {
+  loading.value = true;
+  items.value = getBookmarks();
+  loading.value = false;
 }
 
 function deleteOne(b: Bookmark) {
@@ -42,12 +46,17 @@ function clearAll() {
   load();
 }
 
+// ---------- Helpers ----------
+const hasItems = computed(() => items.value.length > 0);
+
 function formatPlayCount(num: number) {
   if (!num) return "0 tayangan";
-  if (num >= 1_000_000)
+  if (num >= 1_000_000) {
     return (num / 1_000_000).toFixed(1).replace(/\.0$/, "") + " jt tayangan";
-  if (num >= 1000)
-    return (num / 1000).toFixed(1).replace(/\.0$/, "") + " rb tayangan";
+  }
+  if (num >= 1_000) {
+    return (num / 1_000).toFixed(1).replace(/\.0$/, "") + " rb tayangan";
+  }
   return num.toLocaleString("id-ID") + " tayangan";
 }
 
@@ -62,6 +71,10 @@ function formatDate(dateStr: string) {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function getCoverUrl(b: Bookmark) {
+  return `${IMAGE_PROXY_BASE}${encodeURIComponent(b.cover)}`;
 }
 
 onMounted(() => {
@@ -105,7 +118,7 @@ onMounted(() => {
           </div>
 
           <button
-            v-if="items.length"
+            v-if="hasItems"
             type="button"
             @click="clearAll"
             class="text-[11px] text-slate-400 hover:text-red-300"
@@ -136,7 +149,7 @@ onMounted(() => {
 
       <!-- Kosong -->
       <div
-        v-else-if="!items.length"
+        v-else-if="!hasItems"
         class="mt-10 text-center text-sm text-slate-400"
       >
         <p>Belum ada series yang kamu bookmark.</p>
@@ -162,9 +175,7 @@ onMounted(() => {
               class="h-28 w-20 sm:h-32 sm:w-24 overflow-hidden rounded-2xl bg-slate-800"
             >
               <img
-                :src="`https://melolo-api-one.vercel.app/proxy-img?url=${encodeURIComponent(
-                  b.cover
-                )}`"
+                :src="getCoverUrl(b)"
                 :alt="b.title"
                 class="h-full w-full object-cover"
                 loading="lazy"

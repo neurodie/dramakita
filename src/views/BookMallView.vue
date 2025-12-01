@@ -3,33 +3,20 @@
 import { ref, computed, onMounted, watch } from "vue";
 import { useRouter } from "vue-router";
 import { TelegramApp } from "../tele/telegram";
-interface Book {
-  book_id: string;
-  book_name: string;
-  author: string;
-  abstract: string;
-  thumb_url: string;
-  stat_infos?: string[];
-  show_creation_status?: string;
-  word_number?: string;
-  age_gate?: string;
-  color_dominate?: string;
-}
+import type { Book } from "../types/book";
+import { BookService } from "../services/book.service";
 
-interface BookMallResponse {
-  cell?: {
-    books?: Book[];
-    english_name?: string;
-    name?: string;
-  };
-}
+// 🔥 Netshort imports
+import EpisodeList from "../components/netshort/EpisodeList.vue";
+import { NetshortService } from "../services/netshort.service";
+import type { ShortPlayGroup } from "../types/netshort";
 
-const API_BASE = "https://melolo-api-one.vercel.app";
 const MIN_SEARCH_LENGTH = 3;
-
 const router = useRouter();
 
-// state utama
+// =======================
+//  State utama
+// =======================
 const books = ref<Book[]>([]);
 const loading = ref(true);
 const error = ref<string | null>(null);
@@ -43,7 +30,16 @@ const lastSearchQuery = ref<string>("");
 // user Telegram (kalau dibuka dari mini app)
 const user = ref<any | null>(null);
 
-// ambil daftar tag unik dari stat_infos
+// 🔥 State Netshort
+const netshortGroups = ref<ShortPlayGroup[]>([]);
+const loadingNetshort = ref(true);
+const netshortError = ref<string | null>(null);
+
+// =======================
+//  Derived state
+// =======================
+
+// ambil daftar tag unik dari stat_infos (kalau nanti filter diaktifkan lagi)
 const allTags = computed(() => {
   const set = new Set<string>();
   books.value.forEach((b) => {
@@ -54,14 +50,18 @@ const allTags = computed(() => {
 
 // list untuk ditampilkan (backend sudah handle search, di sini cukup filter tag)
 const filteredBooks = computed(() => {
-  let list = books.value;
-
-  if (selectedTag.value) {
-    list = list.filter((b) => b.stat_infos?.includes(selectedTag.value!));
-  }
-
-  return list;
+  if (!selectedTag.value) return books.value;
+  return books.value.filter((b) => b.stat_infos?.includes(selectedTag.value!));
 });
+
+// optional: bisa dipakai di UI kalau mau bedain state "sedang lihat hasil search"
+const isSearching = computed(
+  () => !!lastSearchQuery.value && lastSearchTotal.value !== null
+);
+
+// =======================
+//  Helper functions
+// =======================
 
 function selectTag(tag: string | null) {
   selectedTag.value = tag;
@@ -74,66 +74,98 @@ function formatWordNumber(num?: string) {
   return n.toLocaleString("id-ID") + " kata";
 }
 
-async function fetchBookMall() {
+function setError(err: unknown, fallback: string) {
+  if (err instanceof Error) {
+    error.value = err.message || fallback;
+  } else if (typeof err === "string") {
+    error.value = err;
+  } else {
+    error.value = fallback;
+  }
+}
+
+// =======================
+//  Data fetching
+// =======================
+
+async function loadHomeBooks() {
   loading.value = true;
   error.value = null;
-
-  const q = searchQuery.value.trim();
-  let url = `${API_BASE}/bookmall`;
-  let isSearch = false;
-
-  if (q) {
-    url = `${API_BASE}/search?query=${encodeURIComponent(q)}`;
-    isSearch = true;
-  }
+  lastSearchQuery.value = "";
+  lastSearchTotal.value = null;
 
   try {
-    const res = await fetch(url);
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
-    }
-    const data = await res.json();
-
-    if (isSearch) {
-      // mode search: { query, total, items: [...] }
-      lastSearchQuery.value = q;
-      lastSearchTotal.value = data.total ?? data.items?.length ?? 0;
-
-      const items = data.items ?? [];
-      books.value = items.map((item: any) => ({
-        book_id: item.book_id,
-        book_name: item.title,
-        author: item.author,
-        abstract: item.abstract,
-        thumb_url: `${API_BASE}/proxy-img?url=${encodeURIComponent(
-          item.cover
-        )}`,
-        stat_infos: item.status ? [item.status] : [],
-        show_creation_status: item.status,
-        word_number: item.read_count,
-        age_gate: item.age_gate,
-        color_dominate: undefined,
-      }));
-    } else {
-      // mode awal / tanpa search: { cell: { books: [...] } }
-      lastSearchQuery.value = "";
-      lastSearchTotal.value = null;
-
-      const fromApi: any[] = data.cell?.books ?? [];
-      books.value = fromApi.map((b: any) => ({
-        ...b,
-        thumb_url: `${API_BASE}/proxy-img?url=${encodeURIComponent(
-          b.thumb_url
-        )}`,
-      }));
-    }
-  } catch (err: any) {
-    error.value =
-      err?.message ?? "Gagal memuat data. Cek backend / koneksi kamu.";
+    const list = await BookService.getHomeBooks();
+    books.value = list;
+  } catch (err) {
+    setError(err, "Gagal memuat data. Cek backend / koneksi kamu.");
   } finally {
     loading.value = false;
   }
 }
+
+// 🔥 Netshort home
+async function loadNetshortHome() {
+  loadingNetshort.value = true;
+  netshortError.value = null;
+
+  try {
+    const groups = await NetshortService.getHome({
+      tabId: "1894773235170693121",
+      offset: 0,
+      limit: 2, // misal: ambil 2 group dulu (Rilisan Baru + Baru)
+    });
+    netshortGroups.value = groups;
+  } catch (err) {
+    if (err instanceof Error) {
+      netshortError.value = err.message || "Gagal memuat Netshort.";
+    } else {
+      netshortError.value = "Gagal memuat Netshort.";
+    }
+  } finally {
+    loadingNetshort.value = false;
+  }
+}
+
+async function runSearch(q: string) {
+  loading.value = true;
+  error.value = null;
+
+  try {
+    const { books: list, total, query } = await BookService.searchBooks(q);
+    books.value = list;
+    lastSearchTotal.value = total;
+    lastSearchQuery.value = query;
+  } catch (err) {
+    setError(err, "Gagal memuat data. Cek backend / koneksi kamu.");
+  } finally {
+    loading.value = false;
+  }
+}
+
+function refresh() {
+  const q = searchQuery.value.trim();
+
+  if (!q) {
+    // balik ke mode home
+    loadHomeBooks();
+    loadNetshortHome(); // sekalian refresh Netshort
+    return;
+  }
+
+  if (q.length < MIN_SEARCH_LENGTH) {
+    // jangan tembak API kalau input terlalu pendek
+    lastSearchTotal.value = null;
+    lastSearchQuery.value = "";
+    return;
+  }
+
+  runSearch(q);
+}
+
+// =======================
+//  Navigation
+// =======================
 
 function goToSeries(bookId: string) {
   router.push({
@@ -142,34 +174,30 @@ function goToSeries(bookId: string) {
   });
 }
 
-// tiap user ngetik di search, panggil backend (bookmall / search)
-watch(searchQuery, (val) => {
-  const q = val.trim();
+function goToProfile() {
+  router.push({ name: "profile" });
+}
 
-  if (!q) {
-    fetchBookMall();
-    return;
-  }
+// =======================
+//  Watcher + lifecycle
+// =======================
 
-  if (q.length < MIN_SEARCH_LENGTH) {
-    lastSearchTotal.value = null;
-    lastSearchQuery.value = "";
-    return;
-  }
+// debounce sederhana supaya tidak spam API tiap keypress
+let searchTimeout: number | undefined;
 
-  fetchBookMall();
+watch(searchQuery, () => {
+  window.clearTimeout(searchTimeout);
+  searchTimeout = window.setTimeout(() => {
+    refresh();
+  }, 300); // 300ms: cukup responsif tapi nggak barbar
 });
 
 onMounted(() => {
   // ambil user Telegram kalau ada (kalau dibuka di browser biasa = null)
   user.value = TelegramApp.getUser();
-  fetchBookMall();
+  loadHomeBooks();
+  loadNetshortHome();
 });
-
-// router to profile
-function goToProfile() {
-  router.push({ name: "profile" }); // pastikan route "profile" nanti ada di router
-}
 </script>
 
 <template>
@@ -230,7 +258,7 @@ function goToProfile() {
         <!-- Kanan: tombol refresh -->
         <div class="flex-1 flex justify-end">
           <button
-            @click="fetchBookMall"
+            @click="refresh"
             class="hidden sm:inline-flex items-center gap-1 rounded-full border border-slate-700/70 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-800/80 transition"
           >
             <span class="relative inline-flex h-1.5 w-1.5">
@@ -249,17 +277,14 @@ function goToProfile() {
 
     <main class="mx-auto max-w-6xl px-4 pb-10 pt-4">
       <!-- Search & Info -->
-      <section class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center">
+      <section
+        class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+      >
         <div class="flex-1">
           <div
             class="flex items-center gap-2 text-xs font-medium text-pink-300/90"
           >
-            <!-- <span
-              class="inline-flex h-5 w-5 items-center justify-center rounded-full bg-pink-500/10 text-[10px] border border-pink-500/40"
-            >
-              ★
-            </span>
-            <span>Trending hari ini</span> -->
+            <!-- badge / subtitle kalau mau -->
           </div>
           <h2 class="mt-1 text-xl font-semibold tracking-tight">
             Koleksi romansa panas & CEO drama
@@ -269,13 +294,14 @@ function goToProfile() {
           </p>
         </div>
 
-        <div class="w-full max-w-xs">
-          <label class="relative block">
+        <!-- Search bar -->
+        <div class="w-full mt-2 sm:mt-0 sm:w-auto sm:flex sm:justify-end">
+          <label class="relative block w-full max-w-full sm:w-72 md:w-80">
             <span
-              class="pointer-events-none absolute inset-y-0 left-3 flex items-center text-slate-500"
+              class="pointer-events-none absolute inset-y-0 left-4 flex items-center text-slate-400"
             >
               <svg
-                class="h-4 w-4"
+                class="h-5 w-5"
                 fill="none"
                 stroke="currentColor"
                 stroke-width="1.7"
@@ -288,47 +314,49 @@ function goToProfile() {
                 />
               </svg>
             </span>
+
             <input
               v-model="searchQuery"
               type="text"
               placeholder="Cari judul, penulis, atau sinopsis…"
-              class="w-full rounded-full border border-slate-700/80 bg-slate-900/80 py-2 pl-9 pr-3 text-xs text-slate-100 placeholder:text-slate-500 outline-none focus:border-pink-500/70 focus:ring-2 focus:ring-pink-500/30 transition"
+              class="w-full rounded-full border border-slate-600 bg-slate-900 py-3 pl-11 pr-4 text-sm sm:text-base text-slate-100 placeholder:text-slate-500 outline-none focus:border-pink-500 focus:ring-2 focus:ring-pink-500/40 transition shadow-sm"
             />
           </label>
         </div>
       </section>
 
-      <!-- Tag filter -->
-      <!-- <section v-if="allTags.length" class="mb-4">
-        <div class="flex flex-wrap gap-2 text-xs">
-          <button
-            @click="selectTag(null)"
-            :class="[
-              'rounded-full border px-3 py-1 transition',
-              !selectedTag
-                ? 'border-pink-500/80 bg-pink-500/20 text-pink-100'
-                : 'border-slate-700 bg-slate-900/80 text-slate-300 hover:border-pink-400/60 hover:text-pink-100',
-            ]"
-          >
-            Semua
-          </button>
-          <button
-            v-for="tag in allTags"
-            :key="tag"
-            @click="selectTag(tag)"
-            :class="[
-              'rounded-full border px-3 py-1 transition',
-              selectedTag === tag
-                ? 'border-pink-500/80 bg-pink-500/20 text-pink-100'
-                : 'border-slate-700 bg-slate-900/80 text-slate-300 hover:border-pink-400/60 hover:text-pink-100',
-            ]"
-          >
-            {{ tag }}
-          </button>
+      <!-- 🔥 Section Netshort: Episode list -->
+      <section class="mt-2 space-y-2">
+        <div v-if="loadingNetshort" class="text-xs text-slate-400 px-1">
+          Memuat rekomendasi video pendek…
         </div>
-      </section> -->
 
-      <!-- Loading -->
+        <div
+          v-else-if="netshortError"
+          class="rounded-2xl border border-yellow-500/40 bg-yellow-500/10 px-3 py-2 text-[11px] text-yellow-100"
+        >
+          {{ netshortError }}
+        </div>
+
+        <EpisodeList
+          v-for="group in netshortGroups"
+          v-else
+          :key="group.groupId"
+          :title="group.contentName"
+          :subtitle="
+            group.contentRemark === 'new_weekly'
+              ? 'Update setiap minggu'
+              : group.contentRemark === 'new_release'
+              ? 'Rilisan terbaru hari ini'
+              : undefined
+          "
+          :group-id="group.groupId"
+          :items="group.contentInfos"
+          :show-more="false"
+        />
+      </section>
+
+      <!-- Loading buku -->
       <section v-if="loading" class="mt-6 space-y-3">
         <div
           v-for="i in 4"
@@ -349,7 +377,7 @@ function goToProfile() {
         </div>
       </section>
 
-      <!-- Error -->
+      <!-- Error buku -->
       <section v-else-if="error" class="mt-8">
         <div
           class="rounded-2xl border border-red-500/50 bg-red-500/10 px-4 py-3 text-sm text-red-100 flex items-start gap-3"
@@ -373,7 +401,7 @@ function goToProfile() {
               {{ error }}
             </p>
             <button
-              @click="fetchBookMall"
+              @click="refresh"
               class="mt-2 inline-flex items-center gap-1 rounded-full border border-red-400/60 px-3 py-1 text-xs hover:bg-red-500/20"
             >
               Coba lagi
@@ -397,7 +425,7 @@ function goToProfile() {
         </span>
       </section>
 
-      <!-- List drama -->
+      <!-- List drama (buku) -->
       <section class="mt-4 space-y-3 pb-4">
         <div
           v-if="!filteredBooks.length && !loading && !error"
@@ -525,11 +553,6 @@ function goToProfile() {
 
       <!-- footer kecil -->
       <footer class="mt-6 border-t border-slate-900 pt-4">
-        <!-- <p class="text-[10px] text-slate-500 text-center">
-          Source:
-          <span class="font-medium text-slate-300">melolo / bookmall</span> • -->
-        <!-- Frontend by <span class="text-pink-300">hudaxcode</span> -->
-
         <p class="text-[10px] text-slate-500 text-center">
           kita drama <span class="text-pink-300">2025</span>
         </p>

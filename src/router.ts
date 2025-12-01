@@ -6,6 +6,9 @@ import VideoPlayerView from "./views/VideoPlayerView.vue";
 import MyProfileView from "./views/MyProfileView.vue";
 import BookmarksView from "./views/BookmarksView.vue";
 import UpgradeVipView from "./views/UpgradeVipView.vue";
+// netshort
+import ShortPlayDetailView from "./views/ShortPlayDetailView.vue";
+import ShortVideoPlay from "./views/ShortVideoPlayerView.vue";
 
 const router = createRouter({
   history: createWebHistory(),
@@ -40,6 +43,18 @@ const router = createRouter({
       path: "/upgrade-vip",
       name: "upgradeVip",
       component: UpgradeVipView,
+    },
+    {
+      path: "/shortplay/:id",
+      name: "shortPlayDetail",
+      component: ShortPlayDetailView,
+      props: true,
+    },
+    {
+      path: "/shortplay/:id/episode/:episodeId",
+      name: "shortplay-episode",
+      component: ShortVideoPlay,
+      props: true,
     },
   ],
 });

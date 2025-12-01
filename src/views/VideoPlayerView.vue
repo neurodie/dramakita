@@ -1,44 +1,13 @@
-<!-- src/views/VideoPlayerView.vue -->
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import { SeriesService, type SeriesMeta } from "../services/series.service";
+import { VideoService } from "../services/video.service";
 
 const route = useRoute();
 const router = useRouter();
 
-interface SeriesMeta {
-  series_id: number;
-  title: string;
-  intro: string;
-  episode_count: number;
-  episode_text: string;
-  play_count: number;
-  cover: string;
-  status: number;
-}
-
-interface SeriesApiResponse {
-  series: SeriesMeta;
-  episodes: any[];
-  vid_list: string[];
-}
-
-interface VideoApiResponse {
-  summary: {
-    duration: number | null;
-    video_id: string;
-  };
-  raw: {
-    data: {
-      main_url: string;
-      backup_url?: string;
-      video_height: number;
-      video_width: number;
-      video_model?: string;
-      poster_url?: string;
-    };
-  };
-}
+// ========== State ==========
 
 const loadingVideo = ref(true);
 const videoError = ref<string | null>(null);
@@ -48,6 +17,10 @@ const videoDuration = ref<number | null>(null);
 
 const seriesMeta = ref<SeriesMeta | null>(null);
 const vidList = ref<string[]>([]);
+
+const isFullscreen = ref(false);
+
+// ========== Route derived state ==========
 
 const videoId = computed(() => route.params.id as string);
 const seriesId = computed(() => route.query.series_id as string | undefined);
@@ -73,13 +46,23 @@ const nextLabel = computed(() => {
   })`;
 });
 
-// ------- helper: normalisasi URL video (http -> https) -------
+// ========== Helpers ==========
+
 function normalizeVideoUrl(url: string): string {
   if (url.startsWith("http://")) {
     return url.replace(/^http:\/\//, "https://");
   }
   return url;
 }
+
+function formatDuration(sec: number) {
+  if (!sec || sec <= 0) return "";
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}:${s.toString().padStart(2, "0")} menit`;
+}
+
+// ========== Navigation ==========
 
 function goBack() {
   router.back();
@@ -98,19 +81,22 @@ function goNext() {
 }
 
 function handleEnded() {
-  // auto play next seperti short
   if (hasNext.value) {
     goNext();
   }
 }
 
-const isFullscreen = ref(false);
+// ========== Fullscreen (fake overlay) ==========
+
 function enterFullscreen() {
   isFullscreen.value = true;
 }
+
 function exitFullscreen() {
   isFullscreen.value = false;
 }
+
+// ========== API calls via services ==========
 
 async function fetchVideo() {
   if (!videoId.value) return;
@@ -122,29 +108,20 @@ async function fetchVideo() {
   videoDuration.value = null;
 
   try {
-    const res = await fetch(
-      `https://melolo-api-one.vercel.app/video?video_id=${encodeURIComponent(
-        videoId.value
-      )}`
-    );
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
-    }
-
-    const data: VideoApiResponse = await res.json();
+    const data = await VideoService.getVideo(videoId.value);
     const rawData = data.raw?.data;
 
     if (!rawData) {
       throw new Error("Data video tidak ditemukan dalam respons.");
     }
 
-    // ambil main_url dulu, kalau kosong coba backup_url
+    // main_url => fallback ke backup_url
     const rawUrl = rawData.main_url || rawData.backup_url;
     if (!rawUrl) {
       throw new Error("URL video tidak ditemukan dalam respons.");
     }
 
-    // 🔑 FIX: normalisasi ke HTTPS, menghindari mixed-content di Android/WebView
+    // normalisasi ke HTTPS, menghindari mixed-content
     videoUrl.value = normalizeVideoUrl(rawUrl);
 
     // coba ambil poster & duration dari video_model kalau ada
@@ -163,8 +140,7 @@ async function fetchVideo() {
         } else if (data.summary.duration != null) {
           videoDuration.value = data.summary.duration;
         }
-      } catch (e) {
-        // fallback ke poster_url top-level
+      } catch {
         if (rawData.poster_url) {
           posterUrl.value = rawData.poster_url;
         }
@@ -189,23 +165,16 @@ async function fetchSeriesVidList() {
   if (!seriesId.value) return;
 
   try {
-    const res = await fetch(
-      `https://melolo-api-one.vercel.app/series?series_id=${encodeURIComponent(
-        seriesId.value
-      )}`
-    );
-    if (!res.ok) return;
-
-    const data: SeriesApiResponse = await res.json();
+    const data = await SeriesService.getSeries(seriesId.value);
     seriesMeta.value = data.series;
     vidList.value = data.vid_list || [];
   } catch (e) {
-    // kalau gagal ya udah, auto-next nonaktif
     console.error("Gagal fetch series vid_list", e);
   }
 }
 
-// fetch saat pertama mount
+// ========== Lifecycle & watchers ==========
+
 onMounted(() => {
   fetchVideo();
   if (seriesId.value) {
@@ -213,7 +182,6 @@ onMounted(() => {
   }
 });
 
-// kalau videoId atau seriesId berubah (karena auto-next) → refetch
 watch(
   () => videoId.value,
   () => {
@@ -323,7 +291,7 @@ watch(
 
       <!-- Player -->
       <div v-else class="flex-1 flex flex-col gap-3">
-        <!-- Normal mode / fake fullscreen mode -->
+        <!-- Normal / fake fullscreen -->
         <div
           :class="[
             isFullscreen
@@ -352,7 +320,7 @@ watch(
               @ended="handleEnded"
             />
 
-            <!-- Tombol fullscreen enter -->
+            <!-- Fullscreen enter -->
             <button
               v-if="!isFullscreen"
               type="button"
@@ -374,7 +342,7 @@ watch(
               </svg>
             </button>
 
-            <!-- Tombol fullscreen exit -->
+            <!-- Fullscreen exit -->
             <button
               v-if="isFullscreen"
               type="button"
@@ -386,14 +354,14 @@ watch(
           </div>
         </div>
 
-        <!-- Info & next (disembunyiin kalau lagi fullscreen biar bersih) -->
+        <!-- Info & next (hidden saat fullscreen) -->
         <div v-if="!isFullscreen" class="mt-2 flex flex-col gap-2">
           <div class="flex items-center justify-between text-xs">
             <div class="text-slate-400">
               <span v-if="videoDuration">
                 ~{{ Math.round(videoDuration) }} detik
               </span>
-              <span v-else> Video pendek </span>
+              <span v-else>Video pendek</span>
             </div>
 
             <button
@@ -427,7 +395,7 @@ watch(
           </p>
         </div>
 
-        <!-- Progress kecil juga disembunyiin kalau fullscreen -->
+        <!-- Progress (hidden saat fullscreen) -->
         <div
           v-if="!isFullscreen && seriesMeta && vidList.length"
           class="mt-2 flex items-center justify-between text-[10px] text-slate-500"

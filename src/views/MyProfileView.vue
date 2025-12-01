@@ -26,14 +26,51 @@ interface AccountStatus {
 
 const router = useRouter();
 
+// state utama
 const user = ref<any | null>(null);
 const account = ref<AccountStatus | null>(null);
 const loading = ref(true);
 const error = ref<string | null>(null);
 
-// const isVip = computed(() => account.value?.status === "vip");
+// membership lokal (misalnya dari localStorage / lib)
 const membership = ref(getMembership());
 const isVip = computed(() => membership.value.status === "vip");
+
+// ========= Computed helper untuk template =========
+
+const displayName = computed(
+  () => user.value?.first_name || "Pengguna DramaKita"
+);
+
+const username = computed(() => user.value?.username || "guest");
+
+const telegramId = computed<number | null>(() => user.value?.id ?? null);
+
+const avatarInitial = computed(() => displayName.value.charAt(0).toUpperCase());
+
+const vipLabelText = computed(
+  () => account.value?.vip_label || (isVip.value ? "VIP Aktif" : "Free User")
+);
+
+const vipDescription = computed(() =>
+  isVip.value
+    ? "Kamu bisa menikmati semua episode & fitur premium."
+    : "Upgrade ke VIP untuk membuka semua episode & fitur ekstra."
+);
+
+const vipExpiredText = computed(() => {
+  if (!isVip.value) return "Belum ada paket VIP aktif.";
+  if (account.value?.vip_expired_at) {
+    return `Berlaku sampai: ${formatDate(account.value.vip_expired_at)}`;
+  }
+  return "Masa aktif VIP tidak diketahui (cek backend).";
+});
+
+const hasPurchases = computed(
+  () => (account.value?.purchases?.length ?? 0) > 0
+);
+
+// ========= Navigation =========
 
 function goBack() {
   router.back();
@@ -44,12 +81,14 @@ function goUpgradeVip() {
 }
 
 function goHistory() {
-  router.push({ name: "history" }); // nanti kita buat route & halaman ini
+  router.push({ name: "history" });
 }
 
 function goBookmarks() {
-  router.push({ name: "bookmarks" }); // nanti juga
+  router.push({ name: "bookmarks" });
 }
+
+// ========= Helper formatting =========
 
 function formatDate(dateStr: string | null) {
   if (!dateStr) return "-";
@@ -64,26 +103,31 @@ function formatDate(dateStr: string | null) {
   });
 }
 
+// ========= API =========
+
 async function fetchAccountStatus(telegramId: number) {
   loading.value = true;
   error.value = null;
 
+  const url = `${API_BASE}/account/status?telegram_id=${encodeURIComponent(
+    String(telegramId)
+  )}`;
+
   try {
-    const res = await fetch(
-      `${API_BASE}/account/status?telegram_id=${encodeURIComponent(telegramId)}`
-    );
+    const res = await fetch(url);
 
     if (!res.ok) {
       throw new Error(`HTTP ${res.status}`);
     }
 
-    const data = await res.json();
-    account.value = data as AccountStatus;
+    const data = (await res.json()) as AccountStatus;
+    account.value = data;
   } catch (e: any) {
     console.error("Gagal fetch account status:", e);
     error.value =
       e?.message ??
       "Gagal mengambil status akun. Paket VIP akan ditampilkan sebagai FREE.";
+
     // fallback default
     account.value = {
       telegram_id: telegramId,
@@ -98,14 +142,12 @@ async function fetchAccountStatus(telegramId: number) {
 }
 
 onMounted(() => {
-  // ambil user Telegram dari Mini App
   const u = TelegramApp.getUser();
   user.value = u;
 
   if (u?.id) {
     fetchAccountStatus(u.id);
   } else {
-    // kalau bukan dari mini app, tetap kasih default
     loading.value = false;
     account.value = {
       telegram_id: 0,
@@ -167,21 +209,16 @@ onMounted(() => {
         <div
           class="h-11 w-11 rounded-full bg-[#3390ec] flex items-center justify-center text-sm font-bold text-white shadow-lg shadow-sky-500/40 uppercase"
         >
-          <span v-if="user?.first_name">
-            {{ user.first_name.charAt(0) }}
-          </span>
-          <span v-else>D</span>
+          <span>{{ avatarInitial }}</span>
         </div>
 
         <div class="flex-1 min-w-0">
           <p class="text-sm font-semibold truncate">
-            {{ user?.first_name || "Pengguna DramaKita" }}
+            {{ displayName }}
           </p>
-          <p class="text-[11px] text-slate-400 truncate">
-            @{{ user?.username || "guest" }}
-          </p>
-          <p v-if="user?.id" class="text-[11px] text-slate-500">
-            ID Telegram: <span class="font-mono">{{ user.id }}</span>
+          <p class="text-[11px] text-slate-400 truncate">@{{ username }}</p>
+          <p v-if="telegramId" class="text-[11px] text-slate-500">
+            ID Telegram: <span class="font-mono">{{ telegramId }}</span>
           </p>
         </div>
 
@@ -190,14 +227,14 @@ onMounted(() => {
             v-if="isVip"
             class="inline-flex items-center gap-1 rounded-full bg-yellow-400/10 border border-yellow-400/60 px-2.5 py-1 text-[11px] text-yellow-100"
           >
-            <span class="h-1.5 w-1.5 rounded-full bg-yellow-300"></span>
+            <span class="h-1.5 w-1.5 rounded-full bg-yellow-300" />
             VIP
           </span>
           <span
             v-else
             class="inline-flex items-center gap-1 rounded-full bg-slate-800/80 border border-slate-600 px-2.5 py-1 text-[11px] text-slate-200"
           >
-            <span class="h-1.5 w-1.5 rounded-full bg-slate-400"></span>
+            <span class="h-1.5 w-1.5 rounded-full bg-slate-400" />
             FREE
           </span>
         </div>
@@ -225,14 +262,10 @@ onMounted(() => {
           <div class="flex items-center justify-between text-sm">
             <div>
               <p class="text-slate-200 font-medium">
-                {{ account?.vip_label || (isVip ? "VIP Aktif" : "Free User") }}
+                {{ vipLabelText }}
               </p>
               <p class="text-[11px] text-slate-400">
-                {{
-                  isVip
-                    ? "Kamu bisa menikmati semua episode & fitur premium."
-                    : "Upgrade ke VIP untuk membuka semua episode & fitur ekstra."
-                }}
+                {{ vipDescription }}
               </p>
             </div>
 
@@ -246,16 +279,9 @@ onMounted(() => {
           </div>
 
           <div class="mt-3 text-[11px] text-slate-400 space-y-1.5">
-            <p v-if="isVip && account?.vip_expired_at">
-              Berlaku sampai:
-              <span class="text-slate-100">
-                {{ formatDate(account.vip_expired_at) }}
-              </span>
+            <p>
+              {{ vipExpiredText }}
             </p>
-            <p v-else-if="isVip">
-              Masa aktif VIP tidak diketahui (cek backend).
-            </p>
-            <p v-else>Belum ada paket VIP aktif.</p>
           </div>
 
           <p v-if="error" class="mt-2 text-[11px] text-red-300">
@@ -280,16 +306,13 @@ onMounted(() => {
           />
         </div>
 
-        <div
-          v-else-if="!account?.purchases?.length"
-          class="text-[11px] text-slate-400"
-        >
+        <div v-else-if="!hasPurchases" class="text-[11px] text-slate-400">
           Belum ada transaksi VIP yang tercatat.
         </div>
 
         <div v-else class="space-y-2 max-h-48 overflow-y-auto pr-1 text-[11px]">
           <div
-            v-for="p in account.purchases"
+            v-for="p in account?.purchases"
             :key="p.id"
             class="flex items-center justify-between rounded-2xl bg-slate-900/80 border border-slate-800 px-3 py-2"
           >

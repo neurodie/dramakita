@@ -1,4 +1,3 @@
-<!-- src/views/SeriesDetailView.vue -->
 <script setup lang="ts">
 import { ref, onMounted, computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
@@ -7,36 +6,14 @@ import {
   removeBookmark,
   isSeriesBookmarked,
 } from "../lib/bookmarks";
+import {
+  SeriesService,
+  type SeriesMeta,
+  type Episode,
+} from "../services/series.service";
 
 const route = useRoute();
 const router = useRouter();
-
-interface SeriesMeta {
-  series_id: number;
-  title: string;
-  intro: string;
-  episode_count: number;
-  episode_text: string;
-  play_count: number;
-  cover: string;
-  status: number;
-}
-
-interface Episode {
-  index: number;
-  vid: string;
-  duration: number; // detik
-  likes: number;
-  cover: string;
-  vertical: boolean;
-  disclaimer: string | null;
-}
-
-interface SeriesApiResponse {
-  series: SeriesMeta;
-  episodes: Episode[];
-  vid_list: string[];
-}
 
 const loading = ref(true);
 const error = ref<string | null>(null);
@@ -49,6 +26,22 @@ const vidList = ref<string[]>([]);
 const isBookmarked = ref(false);
 
 const seriesId = computed(() => route.params.id as string);
+
+// 🔹 helper cover URL
+const MELOLO_BASE = "https://melolo-api-one.vercel.app";
+
+function buildProxyImageUrl(rawUrl: string): string {
+  if (!rawUrl) return "";
+  return `${MELOLO_BASE}/proxy-img?url=${encodeURIComponent(rawUrl)}`;
+}
+
+function getSeriesCoverUrl(series: SeriesMeta): string {
+  return buildProxyImageUrl(series.cover);
+}
+
+function getEpisodeCoverUrl(ep: Episode): string {
+  return buildProxyImageUrl(ep.cover);
+}
 
 function goBack() {
   router.back();
@@ -81,22 +74,12 @@ async function fetchSeries() {
   error.value = null;
 
   try {
-    const res = await fetch(
-      `https://melolo-api-one.vercel.app/series?series_id=${encodeURIComponent(
-        seriesId.value
-      )}`
-    );
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
-    }
-
-    const data: SeriesApiResponse = await res.json();
+    const data = await SeriesService.getSeries(seriesId.value);
 
     seriesMeta.value = data.series;
     episodes.value = data.episodes || [];
     vidList.value = data.vid_list || [];
 
-    // setelah meta keisi → cek bookmark
     syncBookmarkState();
   } catch (err: any) {
     console.error(err);
@@ -110,8 +93,8 @@ async function fetchSeries() {
 function openEpisode(ep: Episode) {
   router.push({
     name: "video",
-    params: { id: ep.vid }, // /video/:id
-    query: { series_id: seriesId.value || "" }, // buat auto-next
+    params: { id: ep.vid },
+    query: { series_id: seriesId.value || "" },
   });
 }
 
@@ -119,11 +102,9 @@ function toggleBookmark() {
   if (!seriesMeta.value) return;
 
   if (isBookmarked.value) {
-    // hapus dari bookmark
     removeBookmark(seriesMeta.value.series_id);
     isBookmarked.value = false;
   } else {
-    // tambah ke bookmark
     addOrUpdateBookmark({
       series_id: seriesId.value,
       title: seriesMeta.value.title,
@@ -226,9 +207,7 @@ onMounted(() => {
               class="h-40 w-28 overflow-hidden rounded-2xl bg-slate-800 sm:h-48 sm:w-32"
             >
               <img
-                :src="`https://melolo-api-one.vercel.app/proxy-img?url=${encodeURIComponent(
-                  seriesMeta.cover
-                )}`"
+                :src="getSeriesCoverUrl(seriesMeta)"
                 :alt="seriesMeta.title"
                 class="h-full w-full object-cover"
                 loading="lazy"
@@ -305,7 +284,7 @@ onMounted(() => {
           </div>
         </section>
 
-        <!-- Daftar episode (tetap sama) -->
+        <!-- Daftar episode -->
         <section
           class="rounded-3xl border border-slate-800 bg-slate-900/80 p-4 sm:p-5"
         >
@@ -338,9 +317,7 @@ onMounted(() => {
               <div class="relative">
                 <div class="aspect-[9/16] w-full overflow-hidden bg-slate-800">
                   <img
-                    :src="`https://melolo-api-one.vercel.app/proxy-img?url=${encodeURIComponent(
-                      ep.cover
-                    )}`"
+                    :src="getEpisodeCoverUrl(ep)"
                     :alt="`Episode ${ep.index}`"
                     class="h-full w-full object-cover group-hover:scale-[1.03] transition-transform duration-200"
                     loading="lazy"

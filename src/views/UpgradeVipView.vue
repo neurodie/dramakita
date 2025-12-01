@@ -14,10 +14,12 @@ const loading = ref(true);
 const membership = ref<Membership>({ status: "free" });
 const message = ref<string | null>(null);
 
+// ========= Navigation =========
 function goBack() {
   router.back();
 }
 
+// ========= Load & state =========
 function loadMembership() {
   loading.value = true;
   membership.value = getMembership();
@@ -26,6 +28,7 @@ function loadMembership() {
 
 const isVip = computed(() => membership.value.status === "vip");
 
+// ========= Helpers =========
 function formatPlanLabel(plan?: string) {
   if (!plan) return "";
   if (plan === "weekly") return "VIP Mingguan";
@@ -47,26 +50,38 @@ function formatDate(dateStr?: string | null) {
   });
 }
 
+function showMessage(text: string, timeout = 2500) {
+  message.value = text;
+  window.setTimeout(() => {
+    message.value = null;
+  }, timeout);
+}
+
+// computed tambahan biar template lebih enak dibaca
+const statusChipLabel = computed(() => (isVip.value ? "VIP" : "Free user"));
+
+const planLabel = computed(() =>
+  isVip.value && membership.value.plan
+    ? formatPlanLabel(membership.value.plan)
+    : ""
+);
+
+// ========= Actions =========
 function handleUpgrade(plan: "weekly" | "monthly" | "lifetime") {
   const m = upgradeToVip(plan);
   membership.value = m;
+
   if (plan === "lifetime") {
-    message.value = "Berhasil upgrade ke VIP Lifetime 🎉";
+    showMessage("Berhasil upgrade ke VIP Lifetime 🎉", 2500);
   } else {
-    message.value = `Berhasil upgrade ke ${formatPlanLabel(plan)} 🎉`;
+    showMessage(`Berhasil upgrade ke ${formatPlanLabel(plan)} 🎉`, 2500);
   }
-  setTimeout(() => {
-    message.value = null;
-  }, 2500);
 }
 
 function handleDowngrade() {
   const m = downgradeToFree();
   membership.value = m;
-  message.value = "Status dikembalikan ke Free user.";
-  setTimeout(() => {
-    message.value = null;
-  }, 2000);
+  showMessage("Status dikembalikan ke Free user.", 2000);
 }
 
 onMounted(() => {
@@ -146,22 +161,21 @@ onMounted(() => {
           <div>
             <div class="flex items-center gap-2">
               <span
-                class="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium"
+                class="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium border"
                 :class="
                   isVip
-                    ? 'bg-amber-500/10 text-amber-200 border border-amber-400/60'
-                    : 'bg-slate-800/80 text-slate-200 border border-slate-700/80'
+                    ? 'bg-amber-500/10 text-amber-200 border-amber-400/60'
+                    : 'bg-slate-800/80 text-slate-200 border-slate-700/80'
                 "
               >
-                <span v-if="isVip">VIP</span>
-                <span v-else>Free user</span>
+                {{ statusChipLabel }}
               </span>
 
               <span
-                v-if="membership.plan && isVip"
+                v-if="planLabel && isVip"
                 class="text-[11px] text-slate-400"
               >
-                {{ formatPlanLabel(membership.plan) }}
+                {{ planLabel }}
               </span>
             </div>
 
