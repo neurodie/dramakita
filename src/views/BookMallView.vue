@@ -2,20 +2,26 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from "vue";
 import { useRouter } from "vue-router";
+
 import { TelegramApp } from "../tele/telegram";
 import type { Book } from "../types/book";
 import { BookService } from "../services/book.service";
 
-// 🔥 Netshort imports
 import EpisodeList from "../components/netshort/EpisodeList.vue";
 import { NetshortService } from "../services/netshort.service";
 import type { ShortPlayGroup } from "../types/netshort";
 
+// =======================
+//  Konstanta
+// =======================
 const MIN_SEARCH_LENGTH = 3;
+const NETSHORT_TAB_HOME = "1894773235170693121";
+const NETSHORT_TAB_DUB = "1965372594714603522";
+
 const router = useRouter();
 
 // =======================
-//  State utama
+//  State: Buku
 // =======================
 const books = ref<Book[]>([]);
 const loading = ref(true);
@@ -27,46 +33,33 @@ const selectedTag = ref<string | null>(null);
 const lastSearchTotal = ref<number | null>(null);
 const lastSearchQuery = ref<string>("");
 
-// user Telegram (kalau dibuka dari mini app)
+// =======================
+//  State: User Telegram
+// =======================
 const user = ref<any | null>(null);
 
-// 🔥 State Netshort
+// =======================
+//  State: Netshort Home
+// =======================
 const netshortGroups = ref<ShortPlayGroup[]>([]);
 const loadingNetshort = ref(true);
 const netshortError = ref<string | null>(null);
 
-// =======================
-//  Derived state
-// =======================
-
-// ambil daftar tag unik dari stat_infos (kalau nanti filter diaktifkan lagi)
-const allTags = computed(() => {
-  const set = new Set<string>();
-  books.value.forEach((b) => {
-    b.stat_infos?.forEach((tag) => set.add(tag));
-  });
-  return Array.from(set);
-});
-
-// list untuk ditampilkan (backend sudah handle search, di sini cukup filter tag)
-const filteredBooks = computed(() => {
-  if (!selectedTag.value) return books.value;
-  return books.value.filter((b) => b.stat_infos?.includes(selectedTag.value!));
-});
-
-// optional: bisa dipakai di UI kalau mau bedain state "sedang lihat hasil search"
-const isSearching = computed(
-  () => !!lastSearchQuery.value && lastSearchTotal.value !== null
+// hanya ambil group dengan contentName === "Baru"
+const netshortNewReleaseGroups = computed(() =>
+  netshortGroups.value.filter((g) => g.contentName === "Baru")
 );
 
 // =======================
-//  Helper functions
+//  State: Netshort Sulih Suara
 // =======================
+const dubGroups = ref<ShortPlayGroup[]>([]);
+const loadingDub = ref(true);
+const dubError = ref<string | null>(null);
 
-function selectTag(tag: string | null) {
-  selectedTag.value = tag;
-}
-
+// =======================
+//  Helper
+// =======================
 function formatWordNumber(num?: string) {
   if (!num) return "";
   const n = Number(num);
@@ -84,10 +77,15 @@ function setError(err: unknown, fallback: string) {
   }
 }
 
-// =======================
-//  Data fetching
-// =======================
+// filter buku berdasar tag (kalau nanti butuh filter genre)
+const filteredBooks = computed(() => {
+  if (!selectedTag.value) return books.value;
+  return books.value.filter((b) => b.stat_infos?.includes(selectedTag.value!));
+});
 
+// =======================
+//  Data fetching: Buku
+// =======================
 async function loadHomeBooks() {
   loading.value = true;
   error.value = null;
@@ -101,29 +99,6 @@ async function loadHomeBooks() {
     setError(err, "Gagal memuat data. Cek backend / koneksi kamu.");
   } finally {
     loading.value = false;
-  }
-}
-
-// 🔥 Netshort home
-async function loadNetshortHome() {
-  loadingNetshort.value = true;
-  netshortError.value = null;
-
-  try {
-    const groups = await NetshortService.getHome({
-      tabId: "1894773235170693121",
-      offset: 0,
-      limit: 2, // misal: ambil 2 group dulu (Rilisan Baru + Baru)
-    });
-    netshortGroups.value = groups;
-  } catch (err) {
-    if (err instanceof Error) {
-      netshortError.value = err.message || "Gagal memuat Netshort.";
-    } else {
-      netshortError.value = "Gagal memuat Netshort.";
-    }
-  } finally {
-    loadingNetshort.value = false;
   }
 }
 
@@ -146,15 +121,16 @@ async function runSearch(q: string) {
 function refresh() {
   const q = searchQuery.value.trim();
 
+  // kalau search kosong → balik ke home mode
   if (!q) {
-    // balik ke mode home
     loadHomeBooks();
-    loadNetshortHome(); // sekalian refresh Netshort
+    loadNetshortHome();
+    loadNetshortDub();
     return;
   }
 
+  // hindari spam API kalau input terlalu pendek
   if (q.length < MIN_SEARCH_LENGTH) {
-    // jangan tembak API kalau input terlalu pendek
     lastSearchTotal.value = null;
     lastSearchQuery.value = "";
     return;
@@ -164,9 +140,55 @@ function refresh() {
 }
 
 // =======================
+//  Data fetching: Netshort
+// =======================
+async function loadNetshortHome() {
+  loadingNetshort.value = true;
+  netshortError.value = null;
+
+  try {
+    const groups = await NetshortService.getHome({
+      tabId: NETSHORT_TAB_HOME,
+      offset: 0,
+      limit: 2, // Rilisan Baru + Baru (nanti di filter, yang kepake cuma "Baru")
+    });
+    netshortGroups.value = groups;
+  } catch (err) {
+    if (err instanceof Error) {
+      netshortError.value = err.message || "Gagal memuat Netshort.";
+    } else {
+      netshortError.value = "Gagal memuat Netshort.";
+    }
+  } finally {
+    loadingNetshort.value = false;
+  }
+}
+
+async function loadNetshortDub() {
+  loadingDub.value = true;
+  dubError.value = null;
+
+  try {
+    const groups = await NetshortService.getHome({
+      tabId: NETSHORT_TAB_DUB,
+      offset: 0,
+      limit: 5,
+    });
+    dubGroups.value = groups;
+  } catch (err) {
+    if (err instanceof Error) {
+      dubError.value = err.message || "Gagal memuat Sulih suara.";
+    } else {
+      dubError.value = "Gagal memuat Sulih suara.";
+    }
+  } finally {
+    loadingDub.value = false;
+  }
+}
+
+// =======================
 //  Navigation
 // =======================
-
 function goToSeries(bookId: string) {
   router.push({
     name: "series",
@@ -179,24 +201,23 @@ function goToProfile() {
 }
 
 // =======================
-//  Watcher + lifecycle
+//  Watchers & lifecycle
 // =======================
 
-// debounce sederhana supaya tidak spam API tiap keypress
 let searchTimeout: number | undefined;
 
 watch(searchQuery, () => {
   window.clearTimeout(searchTimeout);
   searchTimeout = window.setTimeout(() => {
     refresh();
-  }, 300); // 300ms: cukup responsif tapi nggak barbar
+  }, 300);
 });
 
 onMounted(() => {
-  // ambil user Telegram kalau ada (kalau dibuka di browser biasa = null)
   user.value = TelegramApp.getUser();
   loadHomeBooks();
   loadNetshortHome();
+  loadNetshortDub();
 });
 </script>
 
@@ -207,7 +228,7 @@ onMounted(() => {
       class="border-b border-slate-800 bg-slate-950/70 backdrop-blur-lg sticky top-0 z-20"
     >
       <div class="mx-auto max-w-6xl px-4 py-3 flex items-center gap-3">
-        <!-- Kiri: brand + user, bisa diklik ke profil -->
+        <!-- Brand + user (klik ke profil) -->
         <button
           type="button"
           @click="goToProfile"
@@ -220,7 +241,7 @@ onMounted(() => {
             {{ user?.first_name?.substring(0, 1) || "U" }}
           </div>
 
-          <!-- Info -->
+          <!-- Info user -->
           <div class="min-w-0">
             <div class="flex items-center gap-2">
               <h1 class="text-base font-semibold tracking-tight">
@@ -235,7 +256,6 @@ onMounted(() => {
               </span>
             </div>
 
-            <!-- Subtext -->
             <div class="flex items-center gap-1 text-[11px] text-slate-400">
               <svg
                 class="h-3.5 w-3.5"
@@ -255,7 +275,7 @@ onMounted(() => {
           </div>
         </button>
 
-        <!-- Kanan: tombol refresh -->
+        <!-- Tombol refresh -->
         <div class="flex-1 flex justify-end">
           <button
             @click="refresh"
@@ -281,11 +301,6 @@ onMounted(() => {
         class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
       >
         <div class="flex-1">
-          <div
-            class="flex items-center gap-2 text-xs font-medium text-pink-300/90"
-          >
-            <!-- badge / subtitle kalau mau -->
-          </div>
           <h2 class="mt-1 text-xl font-semibold tracking-tight">
             Koleksi romansa panas & CEO drama
           </h2>
@@ -325,10 +340,10 @@ onMounted(() => {
         </div>
       </section>
 
-      <!-- 🔥 Section Netshort: Episode list -->
+      <!-- Netshort: Rilisan terbaru (contentName === 'Baru') -->
       <section class="mt-2 space-y-2">
         <div v-if="loadingNetshort" class="text-xs text-slate-400 px-1">
-          Memuat rekomendasi video pendek…
+          Memuat rilisan terbaru…
         </div>
 
         <div
@@ -339,14 +354,12 @@ onMounted(() => {
         </div>
 
         <EpisodeList
-          v-for="group in netshortGroups"
           v-else
+          v-for="group in netshortNewReleaseGroups"
           :key="group.groupId"
           :title="group.contentName"
           :subtitle="
-            group.contentRemark === 'new_weekly'
-              ? 'Update setiap minggu'
-              : group.contentRemark === 'new_release'
+            group.contentRemark === 'new_release'
               ? 'Rilisan terbaru hari ini'
               : undefined
           "
@@ -356,7 +369,34 @@ onMounted(() => {
         />
       </section>
 
-      <!-- Loading buku -->
+      <!-- Netshort: Sulih suara -->
+      <section class="mt-4 space-y-2">
+        <h3 class="text-sm font-semibold text-slate-100 px-1"></h3>
+
+        <div v-if="loadingDub" class="text-xs text-slate-400 px-1">
+          Memuat koleksi sulih suara…
+        </div>
+
+        <div
+          v-else-if="dubError"
+          class="rounded-2xl border border-yellow-500/40 bg-yellow-500/10 px-3 py-2 text-[11px] text-yellow-100"
+        >
+          {{ dubError }}
+        </div>
+
+        <EpisodeList
+          v-else
+          v-for="group in dubGroups"
+          :key="group.groupId"
+          :title="group.contentName || 'Sulih suara pilihan'"
+          :subtitle="group.contentRemark || undefined"
+          :group-id="group.groupId"
+          :items="group.contentInfos"
+          :show-more="false"
+        />
+      </section>
+
+      <!-- Skeleton loading buku -->
       <section v-if="loading" class="mt-6 space-y-3">
         <div
           v-for="i in 4"
